@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+bridge/config.toml
+bridge/state.sqlite
+bridge/state.sqlite-journal
+bridge/state.sqlite-wal
+bridge/state.sqlite-shm
+*.log
+.vscode/
+.idea/

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      { "command": "{{PYTHON}} \"{{RUNNER}}\" sessionStart", "timeout": 30 }
+    ],
+    "beforeSubmitPrompt": [
+      { "command": "{{PYTHON}} \"{{RUNNER}}\" beforeSubmitPrompt", "timeout": 30 }
+    ],
+    "afterAgentResponse": [
+      { "command": "{{PYTHON}} \"{{RUNNER}}\" afterAgentResponse", "timeout": 30 }
+    ],
+    "afterAgentThought": [
+      { "command": "{{PYTHON}} \"{{RUNNER}}\" afterAgentThought", "timeout": 30 }
+    ],
+    "beforeShellExecution": [
+      { "command": "{{PYTHON}} \"{{RUNNER}}\" beforeShellExecution", "timeout": 600, "failClosed": true }
+    ],
+    "beforeMCPExecution": [
+      { "command": "{{PYTHON}} \"{{RUNNER}}\" beforeMCPExecution", "timeout": 600, "failClosed": true }
+    ],
+    "beforeReadFile": [
+      { "command": "{{PYTHON}} \"{{RUNNER}}\" beforeReadFile", "timeout": 600 }
+    ],
+    "subagentStart": [
+      { "command": "{{PYTHON}} \"{{RUNNER}}\" subagentStart", "timeout": 30 }
+    ],
+    "subagentStop": [
+      { "command": "{{PYTHON}} \"{{RUNNER}}\" subagentStop", "timeout": 30 }
+    ],
+    "stop": [
+      { "command": "{{PYTHON}} \"{{RUNNER}}\" stop", "timeout": 30, "loop_limit": null }
+    ]
+  }
+}

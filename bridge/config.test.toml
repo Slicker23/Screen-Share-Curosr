@@ -1,0 +1,16 @@
+# Test config (no real Telegram). DO NOT use for production.
+[telegram]
+bot_token = "1:fake-token-for-test"
+allowed_user_ids = [1]
+
+[bridge]
+host = "127.0.0.1"
+port = 8766
+secret = "test-secret-12345"
+approval_timeout = 5
+
+[behavior]
+allow_shell_patterns = ["^ls$"]
+deny_shell_patterns = ["^rm -rf /$"]
+stream_thoughts = false
+max_message_chars = 3800

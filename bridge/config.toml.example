@@ -1,0 +1,69 @@
+# Cursor Phone Bridge config
+# Copy to config.toml and fill in.
+
+[telegram]
+# From @BotFather after /newbot
+bot_token = "REPLACE_WITH_BOT_TOKEN"
+
+# Your Telegram numeric user ID (get from @userinfobot).
+# Only these users can talk to the bot. Add multiple if needed.
+allowed_user_ids = [123456789]
+
+# Optional: chat_id to receive notifications. If omitted, uses first allowed user's DM.
+# notify_chat_id = 123456789
+
+[bridge]
+# Loopback HTTP server for hooks. Don't expose this.
+host = "127.0.0.1"
+port = 8765
+
+# Shared secret. Hooks send it in Authorization header. Generate with: python -c "import secrets;print(secrets.token_urlsafe(32))"
+secret = "REPLACE_WITH_RANDOM_SECRET"
+
+# Approval timeout (seconds). Hook will deny if no answer in this window.
+# Should be < the hook timeout in hooks.json.
+approval_timeout = 300
+
+[behavior]
+# Auto-allow these shell commands without asking phone (regex, full-match).
+# Examples below cover read-only / safe stuff.
+allow_shell_patterns = [
+    "^ls(\\s.*)?$",
+    "^pwd$",
+    "^cat\\s.*",
+    "^git status$",
+    "^git diff(\\s.*)?$",
+    "^git log(\\s.*)?$",
+]
+
+# Auto-deny these (highest priority). Empty by default.
+deny_shell_patterns = []
+
+# Mirror agent's thinking blocks to phone (verbose).
+stream_thoughts = false
+
+# Max chars per Telegram message (Telegram hard limit 4096).
+max_message_chars = 3800
+
+# When you send a Telegram message and the active Cursor chat has been idle
+# for at least `wake_idle_threshold_secs` seconds, the bridge will use Windows
+# UI automation (find Cursor window, Ctrl+L to focus chat input, paste, Enter)
+# to inject the message instead of just queuing it. Necessary because Cursor's
+# hooks API is purely reactive — once the agent is idle, no `stop` hook will
+# fire to drain the queue until the user manually starts a new turn.
+#
+# OFF by default. Caveat: the wake script appends to any existing draft in
+# the chat input (it does NOT clear it — clearing was destructive when Ctrl+L
+# raced and left focus in an editor pane). Test first:
+#   pwsh -File bridge/wake_cursor.ps1 -DryRun -Message ignored
+# That focuses Cursor and prints the foreground-window class name without
+# typing anything. If it works, flip auto_wake_cursor to true.
+auto_wake_cursor = false
+wake_idle_threshold_secs = 15
+
+# Cursor command-palette string the wake script invokes to focus the chat
+# input. Cursor fuzzy-matches; the top hit is executed when we press Enter.
+# Default "Focus Chat" matches Cursor's "Workbench: Focus on Chat View" or
+# similar in English builds. If your Cursor is in another language, set this
+# to a substring of the localised command name.
+wake_focus_command = "Focus Chat"
