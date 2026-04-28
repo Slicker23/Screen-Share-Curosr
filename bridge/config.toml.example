@@ -67,3 +67,10 @@ wake_idle_threshold_secs = 15
 # similar in English builds. If your Cursor is in another language, set this
 # to a substring of the localised command name.
 wake_focus_command = "Focus Chat"
+
+# macOS only: colon-separated fallback list. If wake_focus_command above
+# doesn't actually focus the chat input on your build of Cursor, the wake
+# script will try each of these in order until one works (or all fail).
+# Empty string = use the script's built-in default chain.
+# Discover the right name with:  bash bridge/wake_diagnose.sh --interactive
+wake_focus_command_fallbacks = ""

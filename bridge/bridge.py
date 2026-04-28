@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -83,6 +84,12 @@ class BehaviorCfg:
     # Chat" matches Cursor's "Workbench: Focus on Chat View" / similar.
     # Override here if your Cursor language pack uses different verbs.
     wake_focus_command: str = "Focus Chat"
+    # macOS only: colon-separated fallback list. If the primary
+    # wake_focus_command fails (e.g. Cursor version names the command
+    # differently), the wake script tries each fallback in order. Empty
+    # string means "use a built-in default chain". Use bridge/wake_diagnose.sh
+    # --interactive to discover the right name for your Cursor build.
+    wake_focus_command_fallbacks: str = ""
 
 
 @dataclass
@@ -708,10 +715,11 @@ async def tg_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 _WAKE_SCRIPT = Path(__file__).parent / "wake_cursor.ps1"
+_WAKE_SCRIPT_MAC = Path(__file__).parent / "wake_cursor.sh"
 
 
-async def _wake_cursor_with_text(text: str, workspace_hint: str,
-                                  focus_command: str = "Focus Chat") -> tuple[bool, str]:
+async def _wake_cursor_with_text_win(text: str, workspace_hint: str,
+                                      focus_command: str = "Focus Chat") -> tuple[bool, str]:
     """Try to inject `text` into Cursor's chat input directly via Windows UI
     automation. Returns (ok, detail). Non-blocking on the asyncio loop —
     runs the PowerShell helper as a subprocess.
@@ -752,6 +760,91 @@ async def _wake_cursor_with_text(text: str, workspace_hint: str,
         return False, f"wake failed: {e}"
 
 
+async def _wake_cursor_with_text_mac(text: str, workspace_hint: str,
+                                      focus_command: str = "Focus Chat",
+                                      focus_command_fallbacks: str = "") -> tuple[bool, str]:
+    """macOS counterpart of _wake_cursor_with_text_win.
+
+    Shells out to bridge/wake_cursor.sh which uses AppleScript (osascript)
+    to activate Cursor, open the command palette via Cmd+Shift+P, paste the
+    focus command, then paste the user's message and press Return.
+
+    Args are passed via env vars (WAKE_MESSAGE / WAKE_FOCUS_CMD /
+    WAKE_FOCUS_CMDS / WAKE_WORKSPACE) instead of argv to avoid quoting and
+    escaping pain on multi-line or unicode messages.
+
+    focus_command_fallbacks: colon-separated list of focus-command-palette
+    strings to try in order if the primary fails. Lets us survive
+    Cursor-version naming differences (e.g. "Focus Chat" vs
+    "Workbench: Focus on Chat View").
+
+    NOTE: requires the bridge process (or its parent terminal/launchd job)
+    to have Accessibility permission in
+    System Settings > Privacy & Security > Accessibility. Without it,
+    osascript's keystroke synthesis will fail and the wake script returns
+    exit code 5 with a clear error in stderr."""
+    if not _WAKE_SCRIPT_MAC.is_file():
+        return False, f"wake script missing at {_WAKE_SCRIPT_MAC}"
+    env = {
+        **os.environ,
+        "WAKE_MESSAGE": text,
+        "WAKE_FOCUS_CMD": focus_command or "Focus Chat",
+        "WAKE_FOCUS_CMDS": focus_command_fallbacks or "",
+        "WAKE_WORKSPACE": workspace_hint or "",
+    }
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "/bin/bash", str(_WAKE_SCRIPT_MAC),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            return False, "wake script timeout"
+        out = stdout.decode("utf-8", "replace").strip()
+        err = stderr.decode("utf-8", "replace").strip()
+        if proc.returncode == 0:
+            return True, out or "ok"
+        # Surface BOTH stdout and stderr on failure so the user sees the
+        # exact "Accessibility denied" / "all candidates failed" message
+        # in their Telegram reply, not just an opaque exit code.
+        detail_parts = [f"exit={proc.returncode}"]
+        if err:
+            detail_parts.append(err)
+        if out:
+            detail_parts.append(f"out: {out}")
+        return False, " | ".join(detail_parts)
+    except Exception as e:
+        return False, f"wake failed: {e}"
+
+
+async def _wake_cursor_with_text(text: str, workspace_hint: str,
+                                  focus_command: str = "Focus Chat",
+                                  focus_command_fallbacks: str = "") -> tuple[bool, str]:
+    """Platform dispatcher for the auto-wake feature. Routes to the OS-
+    specific implementation. Public surface stays a single async function so
+    tg_text doesn't need to care about the host OS.
+
+    focus_command_fallbacks is currently honored only on macOS — the
+    Windows wake script uses a single command via -FocusCommand because
+    Cursor's command palette behaviour on Windows has been observed to be
+    consistent across releases. The Mac side has more variance so we try
+    the chain. The arg is accepted on both platforms so the caller doesn't
+    need a platform branch.
+
+    Returns (False, "...") on unsupported platforms instead of raising, so
+    auto-wake degrades gracefully to the queue path if someone enables it
+    on Linux."""
+    if sys.platform == "win32":
+        return await _wake_cursor_with_text_win(text, workspace_hint, focus_command)
+    if sys.platform == "darwin":
+        return await _wake_cursor_with_text_mac(text, workspace_hint, focus_command, focus_command_fallbacks)
+    return False, f"auto-wake not supported on platform {sys.platform!r}"
+
+
 async def tg_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     state: BridgeState = ctx.bot_data["state"]
     if not _is_allowed(update, state):
@@ -785,7 +878,11 @@ async def tg_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         hint = ""
         if project_root:
             hint = project_root.replace("\\", "/").rstrip("/").split("/")[-1]
-        ok, detail = await _wake_cursor_with_text(text, hint, cfg.wake_focus_command)
+        ok, detail = await _wake_cursor_with_text(
+            text, hint,
+            cfg.wake_focus_command,
+            cfg.wake_focus_command_fallbacks,
+        )
         if ok:
             state.record_activity(conv_id, "wake_inject", text)
             await msg.reply_text(

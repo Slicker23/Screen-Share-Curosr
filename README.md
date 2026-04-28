@@ -35,20 +35,22 @@ Bridge daemon (127.0.0.1:8765)  ----->  Cursor IDE
 
 ## Requirements
 
-- Windows 10/11 (the installer is PowerShell; the Python code is cross-platform)
+- Windows 10/11 **or** macOS 12+ (Apple Silicon supported)
 - Python 3.11+ on PATH
 - Cursor 1.7+ (for hooks support)
 - A Telegram account
 
+The Python code is cross-platform; only the wake script and installer are OS-specific. Auto-wake is implemented for Windows (`bridge/wake_cursor.ps1`, PowerShell + Win32) and macOS (`bridge/wake_cursor.sh`, AppleScript via `osascript`). The bridge picks the right backend at runtime based on `sys.platform`.
+
 ## Setup
 
-### 1. Make the bot
+### 1. Make the bot (both OSes)
 
 1. Open Telegram, message `@BotFather`, send `/newbot`, follow prompts. Save the **bot token**.
 2. Message `@userinfobot` to learn your numeric Telegram **user ID**.
 3. Open a chat with your new bot and send it any message (otherwise it can't DM you first).
 
-### 2. Install
+### 2. Install — Windows
 
 From this repo root, in PowerShell:
 
@@ -82,6 +84,48 @@ This second run will:
 - Write `%USERPROFILE%\.cursor\hooks.json` (backing up any existing one)
 - Write `%USERPROFILE%\.cursor\cursor-phone-bridge.json` (so hook scripts can find the bridge)
 - Optionally register a Scheduled Task that starts the bridge at logon
+
+### 2. Install — macOS (Apple Silicon)
+
+From this repo root, in Terminal:
+
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+The Mac installer mirrors the Windows one: first run creates `bridge/config.toml` and prints a generated secret; you edit `bridge/config.toml` with your bot token, Telegram user ID, and that secret; second run renders `~/.cursor/hooks.json`, writes `~/.cursor/cursor-phone-bridge.json`, marks `bridge/wake_cursor.sh` executable, and optionally installs a launchd LaunchAgent (`~/Library/LaunchAgents/com.user.cursorphonebridge.plist`) so the bridge auto-starts at login.
+
+After install, **grant Accessibility permission** so the wake script can synthesize keystrokes:
+
+> System Settings → Privacy & Security → Accessibility → add **Terminal** (or whatever app launches the bridge — `iTerm`, `launchd`, etc.) and **Cursor**.
+
+Without it, `osascript` keystroke synthesis is rejected and the wake script returns a clear `Accessibility permission missing` error (the bridge falls back to the queue path automatically).
+
+**Verify everything is wired up:**
+
+```bash
+./install.sh --diagnose                 # read-only check of all components
+bash bridge/wake_diagnose.sh            # quick standalone wake check
+bash bridge/wake_diagnose.sh -i         # interactive walk to find the right
+                                        # "Focus Chat" command-palette name
+```
+
+The interactive diagnose is especially useful if your build of Cursor names the focus command differently — it tries each candidate, asks you which one moved the caret into the chat input, and prints the exact line to add to `bridge/config.toml`.
+
+To run the bridge manually instead of via launchd:
+
+```bash
+python3 bridge/bridge.py
+```
+
+To remove the LaunchAgent later:
+
+```bash
+./install.sh --uninstall-launchagent
+```
+
+**If `pip install --user` is rejected with PEP 668 "externally-managed-environment"** (common with Homebrew Python 3.12+), the installer automatically falls back to a project-local venv at `.venv/` and re-points `hooks.json` + the LaunchAgent at the venv's `python3`. You can also force a venv up front with `./install.sh --use-venv`.
 
 ### 3. Restart Cursor
 
@@ -125,6 +169,11 @@ The bridge ships with a small allowlist in `config.toml`: `ls`, `pwd`, `cat ...`
 | `hooks/runner.py` | Single Python dispatcher invoked by Cursor for every hook event |
 | `hooks/hooks.json.template` | Template; installer renders it into `~/.cursor/hooks.json` with absolute paths |
 | `install.ps1` | Idempotent Windows installer |
+| `install.sh` | Idempotent macOS installer (Apple Silicon) |
+| `bridge/wake_cursor.ps1` | Windows wake script (PowerShell + Win32) |
+| `bridge/wake_cursor.sh` | macOS wake script (AppleScript via `osascript`) |
+| `bridge/wake_diagnose.sh` | Mac standalone diagnostic for the wake feature (`--interactive` to find the right `Focus Chat` command name) |
+| `.gitattributes` | Forces LF endings on `*.sh` so Mac scripts survive a Windows clone |
 
 ## Security notes
 
@@ -152,6 +201,26 @@ This is a Cursor 2.6.x bug, not the bridge. Cursor currently ignores `permission
 
 **"Every shell command in Cursor is denied with 'returned no output'."**
 Your `~/.cursor/hooks.json` is pointing at `pythonw.exe`. That binary detaches stdout, so Cursor reads nothing back and the `failClosed: true` rule blocks the tool. Edit `hooks.json` and replace every `pythonw.exe` with `python.exe`. The installer (newer versions) does this automatically.
+
+**"On macOS auto-wake silently does nothing."**
+Run the standalone diagnose:
+```bash
+bash bridge/wake_diagnose.sh
+```
+It reports OS / process / accessibility / wake-script status in one go. If accessibility is denied, the script tells you which dialog to open. If the dry-run is OK but real wakes still don't type into the chat, the focus-command-palette name is wrong for your Cursor build — run the interactive variant:
+```bash
+bash bridge/wake_diagnose.sh --interactive
+```
+…and it'll walk through candidate names, ask you which one focused the chat, then print the `wake_focus_command = "..."` line to paste into `bridge/config.toml`. You can also pre-load candidates: `WAKE_FOCUS_CMDS="A:B:C" bash bridge/wake_diagnose.sh -i`.
+
+**"On macOS the bridge starts at login but auto-wake fails with permission errors."**
+Apps launched by `launchd` are a different process tree than your interactive Terminal. You need to grant Accessibility to the **launchd**-spawned `python3` process specifically (it shows up in the Accessibility list as `python3` or with the bridge.py script path the first time it tries to synthesize keystrokes). The `--install-launchagent` flag of `install.sh` sets up the LaunchAgent — you just need to approve the permission prompt the first time. Run `./install.sh --diagnose` to confirm whether the LaunchAgent's process has been granted access.
+
+**"`./install.sh` failed with 'externally-managed-environment'."**
+That's PEP 668 from a recent Homebrew/Apple Python. The installer auto-falls-back to a `./.venv/` and re-points everything at it. If for some reason that fallback didn't trigger, force it: `./install.sh --use-venv`. The venv's `python3` will be wired into `~/.cursor/hooks.json` and the LaunchAgent.
+
+**"On macOS, Telegram replies say 'all focus-command candidates failed'."**
+Cursor's command palette didn't fuzzy-match any of the names we tried. Run `bash bridge/wake_diagnose.sh --interactive` to find the right name and put it in `bridge/config.toml` as `wake_focus_command`. Or set `wake_focus_command_fallbacks = "Name1:Name2:Name3"` to try several without committing to one.
 
 **"Hook runner sees `Expecting value: line 1 column 1 (char 0)` parse errors in `~/.cursor/cursor-phone-bridge.log`."**
 Cursor (at least v2.6.x on Windows) pipes the JSON payload to the hook's stdin with a UTF-8 BOM (`EF BB BF`). The runner already handles this via `sys.stdin.buffer.read()` + `decode("utf-8-sig")`. If you're seeing the error on an older runner, pull the latest `hooks/runner.py`.

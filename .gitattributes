@@ -1,0 +1,11 @@
+# Force LF on files that need to run on macOS / Linux.
+# Without this, a Windows clone may stamp CRLF endings via core.autocrlf=true,
+# and bash on Mac will then treat each \r as part of the command name and
+# spew "command not found" garbage when the user runs ./install.sh.
+*.sh        text eol=lf
+*.applescript text eol=lf
+
+# Windows-only files keep CRLF endings — PowerShell is happy either way,
+# but tooling that compares hashes across OSes is less surprising this way.
+*.ps1       text eol=crlf
+*.psm1      text eol=crlf
